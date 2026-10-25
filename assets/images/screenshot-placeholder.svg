@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-labelledby="title description">
+  <title id="title">Screenshot placeholder</title>
+  <desc id="description">An empty frame marking where a future writeup screenshot belongs.</desc>
+  <rect width="960" height="420" fill="#111820"/>
+  <rect x="28" y="28" width="904" height="364" rx="4" fill="none" stroke="#25303b" stroke-dasharray="6 6"/>
+  <rect x="456" y="133" width="48" height="38" rx="3" fill="none" stroke="#8b98a5" stroke-width="2"/>
+  <circle cx="470" cy="144" r="4" fill="#8b98a5"/>
+  <path d="m459 167 14-14 9 9 8-8 11 13" fill="none" stroke="#8b98a5" stroke-width="2"/>
+  <text x="480" y="218" text-anchor="middle" fill="#e6edf3" font-family="monospace" font-size="19">Screenshot placeholder</text>
+  <text x="480" y="254" text-anchor="middle" fill="#8b98a5" font-family="monospace" font-size="14">Replace with an image from your writeup.</text>
+</svg>
