@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="My PwnSec CTF 2026 pickle writeup: using OBJ, BUILD, and sessionstore to work around a restricted pickle loader.">
+  <meta name="theme-color" content="#0d1117">
+  <title>pickle · PwnSec CTF 2026 · Sean's CTF Writeups</title>
+  <link rel="stylesheet" href="../../../../assets/css/style.css">
+  <script src="../../../../assets/js/writeups.js" defer></script>
+  <script src="../../../../assets/js/main.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="site-shell"></div>
+  <noscript>
+    <nav aria-label="Main">JavaScript enables the sidebar and search.
+      <a href="../../../../index.html">Home</a><a href="../../">PwnSec CTF</a><a href="../../../cyberquest/">CyberQuest</a><a href="../../../ncl/">NCL</a><a href="../../../faust/">FAUST CTF</a><a href="../../../misc/">Misc / Labs</a>
+    </nav>
+  </noscript>
+  <main id="main" class="page" tabindex="-1">
+    <div class="page-inner">
+      <nav class="breadcrumbs" aria-label="Breadcrumb">
+        <ol><li><a href="../../../../index.html">Home</a></li><li><a href="../../">PwnSec CTF</a></li><li><a href="../../#year-2026">2026</a></li><li aria-current="page">pickle</li></ol>
+      </nav>
+      <header class="page-heading">
+        <h1>pickle</h1>
+        <p>PwnSec CTF 2026: working around a restricted pickle loader with OBJ and BUILD.</p>
+      </header>
+      <div class="article-layout">
+        <article class="prose" aria-label="pickle writeup">
+          <dl class="metadata">
+            <div><dt>Event:</dt><dd>PwnSec CTF 2026</dd></div>
+            <div><dt>Challenge:</dt><dd>pickle</dd></div>
+            <div><dt>Category:</dt><dd>Python / Deserialization</dd></div>
+          </dl>
+          <p aria-label="Tags"><span class="tag">Python</span> <span class="tag">pickle</span> <span class="tag">Deserialization</span> <span class="tag">Opcodes</span> <span class="tag">Base64</span></p>
+
+          <h2 id="overview">Overview</h2>
+          <p>The application accepted a Base64-encoded pickle payload, but several banned strings and opcodes made the usual approach difficult. I needed to read <code>flag.txt</code> without writing its name directly into the payload, calling functions with <code>REDUCE</code>, or ending the pickle with <code>STOP</code>.</p>
+          <p>I used <code>OBJ</code> to call functions and <code>BUILD</code> to put a builtins dictionary into a capsule's cache. From there, I could recover the functions I needed, construct the filename from integers, and print the result before the unfinished pickle caused a load error.</p>
+
+          <h2 id="initial-analysis">Initial Analysis</h2>
+          <p>I started by unzipping the challenge files. There were two Python scripts, so I read both to understand how the application handled my input and which restrictions I had to work around.</p>
+          <p>The input needed to be a Base64-encoded pickle. Encoding it was the final step; first, I had to build pickle bytes that avoided the filter.</p>
+
+          <h2 id="restrictions">Restrictions</h2>
+          <p>The restrictions that mattered to my approach were:</p>
+          <div class="table-wrap" role="region" aria-label="Relevant payload restrictions" tabindex="0">
+            <table>
+              <thead><tr><th scope="col">Blocked value</th><th scope="col">Effect on my payload</th></tr></thead>
+              <tbody>
+                <tr><td><code>.</code></td><td>I could not include a literal dot in the filename or use the normal <code>STOP</code> opcode.</td></tr>
+                <tr><td><code>flag</code></td><td>I had to construct the filename instead of including <code>flag.txt</code> directly.</td></tr>
+                <tr><td><code>os</code>, <code>system</code></td><td>These strings also had to stay out of the payload.</td></tr>
+                <tr><td><code>REDUCE</code></td><td>I needed a different opcode to call functions.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h2 id="bypassing-reduce">Bypassing REDUCE</h2>
+          <p>Since <code>REDUCE</code> was specifically blocked, I used <code>OBJ</code> instead. In this payload, <code>OBJ</code> let me call a function already on the pickle stack with the arguments I had placed after it.</p>
+          <p>I built the payload manually in a byte string named <code>picklety</code>. This was pretty hard for me. I spent a lot of time looking up pickle opcodes and their byte formats to work out how to build each part.</p>
+
+          <h2 id="accessing-builtins">Accessing Builtins and Useful Functions</h2>
+          <p>The allowed <code>sessionstore</code> module gave me a way to reach <code>sessionstore.__builtins__</code>. In this challenge, that was the builtins dictionary.</p>
+          <p>I created a <code>Capsule</code> and used the <code>BUILD</code> opcode to place that dictionary into its <code>cache</code>. The original payload excerpt shows the exact <code>__builtins__</code> identifier and the state used for the cache:</p>
+          <figure>
+            <img src="images/capsule-builtins.png" alt="Original Python payload builder creating a sessionstore Capsule and using BUILD to set its cache to sessionstore.__builtins__." width="411" height="150" loading="lazy">
+            <figcaption>Creating the capsule, setting its cache, and saving it in memo slot 0.</figcaption>
+          </figure>
+          <p>Next, I used <code>sessionstore.render</code>. Calling <code>render(cap, "open")</code> looked up <code>"open"</code> in the capsule's cache and returned the real <code>open</code> function. That lookup did not require resolving <code>open</code> through pickle's normal <code>find_class</code> check.</p>
+          <p>I repeated the same approach for <code>list</code>, <code>print</code>, and <code>bytes</code>. These lines are from my payload builder; they depend on the capsule already saved in memo slot 0:</p>
+          <div class="code-example"><span class="code-label">python</span><pre tabindex="0" aria-label="Payload excerpt recovering builtin functions"><code>picklety += b"csessionstore\nrender\nq\x01"
+
+picklety += b"(h\x01h\x00Vopen\noq\x02"
+picklety += b"(h\x01h\x00Vlist\noq\x03"
+picklety += b"(h\x01h\x00Vprint\noq\x04"
+picklety += b"(h\x01h\x00Vbytes\noq\x05"</code></pre></div>
+          <p>At that point, I had the functions needed to build the filename, open the file, collect its contents, and print them.</p>
+
+          <h2 id="constructing-filename">Constructing flag.txt</h2>
+          <p>I could not put <code>flag.txt</code> directly into the payload because both <code>flag</code> and <code>.</code> were banned. Instead, I built a bytes object from this integer list:</p>
+          <div class="code-example"><span class="code-label">text</span><pre tabindex="0" aria-label="Filename byte values"><code>102, 108, 97, 103, 46, 116, 120, 116</code></pre></div>
+          <p>Those values represent <code>flag.txt</code>. Using the recovered <code>bytes</code> function let me construct the filename during unpickling, without putting the filename itself into the submitted pickle bytes.</p>
+          <p>The value <code>46</code> needed extra care: it is the byte value of a dot. Encoding that value directly as a binary integer byte would introduce the literal <code>.</code> byte I was trying to avoid. I used the text form of the <code>INT</code> opcode, <code>I46\n</code>, instead. The <code>\n</code> here represents the newline that terminates the integer.</p>
+
+          <h2 id="executing-without-stop">Executing Without STOP</h2>
+          <p>There was still another dot to deal with. A normal pickle ends with <code>STOP</code>, and that opcode is represented by <code>.</code>. Since the dot was banned, I left <code>STOP</code> out entirely.</p>
+          <p>Pickle executes opcodes as it reads them. My payload called <code>open</code> with the constructed filename, passed the file to <code>list</code>, and then passed that result to <code>print</code>. The print operation ran before the loader reached the end of the payload.</p>
+          <aside class="callout" aria-label="Why the final error did not prevent the output"><strong>The final error came too late</strong><p>Without <code>STOP</code>, deserialization still failed at the end. The application ignored that load error, and the flag had already been printed.</p></aside>
+
+          <h2 id="base64-submission">Base64 Encoding and Submission</h2>
+          <p>Once the payload was assembled, I Base64 encoded <code>picklety</code> and submitted the encoded string to the application.</p>
+          <figure>
+            <img src="images/calls-and-base64.png" alt="Original payload builder calling the recovered open, list, and print functions, then printing base64.b64encode(picklety).decode(), with no STOP appended." width="366" height="131" loading="lazy">
+            <figcaption>The final function calls and Base64 encoding step, without a STOP opcode.</figcaption>
+          </figure>
+          <p>The final <code>print(base64.b64encode(picklety).decode())</code> produced the submission string. It was separate from the <code>print</code> call encoded inside the pickle, which printed the file contents during deserialization.</p>
+
+          <h2 id="lessons-learned">Lessons Learned</h2>
+          <ul>
+            <li>Blocking <code>REDUCE</code> did not remove every way to call functions. I could still use <code>OBJ</code>.</li>
+            <li>I had to think about the exact bytes in the payload. The text form of <code>INT</code> let me represent <code>46</code> without including a dot byte.</li>
+            <li>The final unpickling error did not undo the operations that had already run. Leaving out <code>STOP</code> worked here because the application ignored that error after the output was printed.</li>
+          </ul>
+        </article>
+        <nav class="page-toc" id="page-toc" aria-label="On this page"></nav>
+      </div>
+      <footer class="page-footer"><a href="../../">← Back to PwnSec CTF</a></footer>
+    </div>
+  </main>
+</body>
+</html>
